@@ -1,0 +1,139 @@
+import time
+import queue
+import logging
+import threading
+import numpy as np
+from pathlib import Path
+from typing import List, Dict, Any, Tuple
+from transformers import AutoTokenizer
+from optimum.onnxruntime import ORTModelForSequenceClassification
+import onnxruntime as ort
+
+# We will implement these next in src/metrics.py
+from .metrics import INFERENCE_LATENCY, INFERENCE_THROUGHPUT
+
+logger = logging.getLogger(__name__)
+
+def softmax(logits: np.ndarray) -> np.ndarray:
+    """Compute softmax values for each set of scores in logits."""
+    e_x = np.exp(logits - np.max(logits, axis=1, keepdims=True))
+    return e_x / e_x.sum(axis=1, keepdims=True)
+
+class WarmupManager:
+    """
+    Handles graph compilation and memory initialization.
+    ONNX Runtime (and most ML engines) suffer from 'cold start' latency on the 
+    first few inferences. This manager forces compilation before accepting traffic.
+    """
+    @staticmethod
+    def warmup(engine: "OnnxInferenceEngine", dummy_batch_size: int = 4, iterations: int = 3):
+        logger.info("Starting ONNX engine warmup...")
+        dummy_texts = ["This is a warmup sentence to initialize the graph."] * dummy_batch_size
+        
+        start_time = time.time()
+        for _ in range(iterations):
+            # We bypass the metrics trackers during warmup
+            _ = engine._run_inference(dummy_texts)
+            
+        elapsed = time.time() - start_time
+        logger.info(f"Warmup completed in {elapsed:.3f} seconds.")
+
+
+class OnnxInferenceEngine:
+    """
+    Thread-safe Inference Engine using an Object Pool pattern.
+    FastAPI handles requests concurrently. While ONNXRuntime's C++ core is thread-safe, 
+    contention can occur. A pool of distinct sessions ensures lock-free parallelism 
+    tailored to the number of available vCPUs.
+    """
+    def __init__(self, model_dir: str, pool_size: int = 4):
+        self.model_dir = Path(model_dir)
+        self.pool_size = pool_size
+        self.session_pool = queue.Queue(maxsize=pool_size)
+        
+        logger.info(f"Loading Tokenizer from {self.model_dir}...")
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_dir)
+        self.id2label = {0: "NEGATIVE", 1: "POSITIVE"} # SST-2 labels
+        
+        logger.info(f"Initializing ONNX Session Pool (Size: {pool_size})...")
+        self._initialize_pool()
+        
+        # Trigger Warmup immediately upon instantiation
+        WarmupManager.warmup(self)
+
+    def _initialize_pool(self):
+        """Creates multiple ORT sessions optimized for CPU execution."""
+        sess_options = ort.SessionOptions()
+        # OMP_NUM_THREADS control: Bind each session to limited threads to prevent CPU thrashing
+        sess_options.intra_op_num_threads = 2 
+        sess_options.inter_op_num_threads = 1
+        sess_options.graph_optimization_level = ort.GraphOptimizationLevel.ORT_ENABLE_ALL
+
+        for i in range(self.pool_size):
+            model = ORTModelForSequenceClassification.from_pretrained(
+                self.model_dir, 
+                session_options=sess_options
+            )
+            self.session_pool.put(model)
+            logger.debug(f"Initialized ONNX Session {i+1}/{self.pool_size}")
+
+    def _run_inference(self, texts: List[str]) -> Tuple[List[Dict[str, Any]], float]:
+        """Core inference logic. Acquires a session, runs it, and releases it."""
+        # 1. Tokenization
+        inputs = self.tokenizer(
+            texts, 
+            padding=True, 
+            truncation=True, 
+            max_length=128, 
+            return_tensors="np"
+        )
+
+        # 2. Acquire a session from the pool (blocks if all are busy)
+        model_session = self.session_pool.get(block=True)
+        
+        try:
+            # 3. Model Execution
+            start_time = time.perf_counter()
+            outputs = model_session(**inputs)
+            inference_time = time.perf_counter() - start_time
+            
+            # 4. Post-processing
+            logits = outputs.logits
+            probs = softmax(logits)
+            predictions = np.argmax(probs, axis=1)
+            
+            results = []
+            for prob, pred in zip(probs, predictions):
+                results.append({
+                    "label": self.id2label[pred],
+                    "confidence": float(prob[pred])
+                })
+                
+            return results, inference_time
+            
+        finally:
+            # 5. Guarantee session is returned to pool even if exceptions occur
+            self.session_pool.put(model_session)
+
+    def predict_single(self, text: str) -> Dict[str, Any]:
+        """Handles single string predictions with Prometheus tracking."""
+        with INFERENCE_LATENCY.labels(batch_size="1").time():
+            results, inf_time = self._run_inference([text])
+            
+        INFERENCE_THROUGHPUT.labels(batch_size="1").inc(1)
+        return results[0]
+
+    def predict_batch(self, texts: List[str]) -> List[Dict[str, Any]]:
+        """Handles batched predictions (up to 32) with Prometheus tracking."""
+        batch_size = len(texts)
+        if batch_size > 32:
+            raise ValueError("Batch size exceeds maximum limit of 32.")
+            
+        # Prometheus histogram categorizes dynamically
+        bucket = "small" if batch_size <= 8 else "large"
+        
+        with INFERENCE_LATENCY.labels(batch_size=bucket).time():
+            results, inf_time = self._run_inference(texts)
+            
+        INFERENCE_THROUGHPUT.labels(batch_size=bucket).inc(batch_size)
+        return results
