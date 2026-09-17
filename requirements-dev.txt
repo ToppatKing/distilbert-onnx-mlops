@@ -1,0 +1,4 @@
+pytest==7.4.3
+httpx==0.25.2      # For testing FastAPI
+mypy==1.7.0
+ruff==0.1.6        # Fast linting and formatting
