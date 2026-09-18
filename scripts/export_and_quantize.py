@@ -82,27 +82,39 @@ def main():
     )
     onnx.save(inferred_model, str(optimized_model_path))
 
-    quantizer = ORTQuantizer.from_pretrained(OPT_ONNX_DIR)
-
-    dq_config = AutoQuantizationConfig.avx512_vnni(
-        is_static=False,
-        per_channel=True,
-    )
-
     quantizer.quantize(
         save_dir=QUANT_ONNX_DIR,
         quantization_config=dq_config,
     )
 
+    # ORTQuantizer derives the output filename from the input model.
+    # For example: model_optimized_quantized.onnx.
+    quantized_files = list(QUANT_ONNX_DIR.glob("*_quantized.onnx"))
 
-    # 4. Compare sizes
-    raw_size = os.path.getsize(RAW_ONNX_DIR / "model.onnx") / (1024 * 1024)
-    quant_size = os.path.getsize(QUANT_ONNX_DIR / "model_quantized.onnx") / (1024 * 1024)
-    
+    if len(quantized_files) != 1:
+        raise RuntimeError(
+            f"Expected one quantized ONNX file, found: {quantized_files}"
+        )
+
+    generated_quantized_path = quantized_files[0]
+    quantized_model_path = QUANT_ONNX_DIR / "model_quantized.onnx"
+
+    if generated_quantized_path != quantized_model_path:
+        generated_quantized_path.replace(quantized_model_path)
+
+    # Compare sizes
+    raw_size = os.path.getsize(
+        RAW_ONNX_DIR / "model.onnx"
+    ) / (1024 * 1024)
+
+    quant_size = os.path.getsize(
+        quantized_model_path
+    ) / (1024 * 1024)
+
     logger.info("--- Export & Quantization Complete ---")
     logger.info(f"Raw ONNX Size:       {raw_size:.2f} MB")
     logger.info(f"Quantized INT8 Size: {quant_size:.2f} MB")
-    logger.info(f"Reduction:           {((raw_size - quant_size) / raw_size) * 100:.1f}%")
-
-if __name__ == "__main__":
-    main()
+    logger.info(
+        f"Reduction:           "
+        f"{((raw_size - quant_size) / raw_size) * 100:.1f}%"
+    )
