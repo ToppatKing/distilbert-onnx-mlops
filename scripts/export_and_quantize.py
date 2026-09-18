@@ -42,9 +42,9 @@ def main():
         model_name_or_path=MODEL_ID,
         output=RAW_ONNX_DIR,
         task="text-classification",
-        opset=14
+        opset=17,
     )
-    
+        
     model = ORTModelForSequenceClassification.from_pretrained(RAW_ONNX_DIR)
     
     # Save tokenizer to the final directory right away
