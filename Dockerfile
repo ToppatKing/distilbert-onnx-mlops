@@ -10,11 +10,16 @@ WORKDIR /app
 
 # Install standard dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir --default-timeout=100 -r requirements.txt
+RUN --mount=type=cache,target=/root/.cache/pip \
+    python -m pip install \
+      --retries 10 \
+      --timeout 180 \
+      -r requirements.txt
 
 # Copy the export script
 COPY scripts/ scripts/
+
+
 
 # Execute the pipeline: Download -> Optimize -> Quantize INT8
 # This runs at build time, meaning the model is baked into the image.
@@ -25,20 +30,19 @@ RUN python scripts/export_and_quantize.py
 # ==========================================
 FROM python:3.10-slim AS runtime
 
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
-ENV MODEL_PATH="/app/model_store/onnx_quantized"
-ENV POOL_SIZE="4"
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=180
 
 WORKDIR /app
 
-# Create a non-root user for security
-RUN useradd -m -s /bin/bash mlops_user
-
-# Install only runtime dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-
+RUN python -m pip install \
+      --retries 10 \
+      --timeout 180 \
+      --no-cache-dir \
+      -r requirements.txt  
 # Copy ONLY the fully optimized, quantized INT8 model from the builder
 COPY --from=builder /app/model_store/onnx_quantized ./model_store/onnx_quantized
 
