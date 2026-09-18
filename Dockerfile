@@ -10,7 +10,8 @@ WORKDIR /app
 
 # Install standard dependencies
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir --default-timeout=100 -r requirements.txt
 
 # Copy the export script
 COPY scripts/ scripts/
@@ -22,7 +23,7 @@ RUN python scripts/export_and_quantize.py
 # ==========================================
 # Stage 2: Production Runtime
 # ==========================================
-FROM python:3.10-slim as runtime
+FROM python:3.10-slim AS runtime
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
