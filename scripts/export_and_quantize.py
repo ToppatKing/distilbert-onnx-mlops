@@ -70,6 +70,12 @@ def main():
 
     optimized_model_path = OPT_ONNX_DIR / "model_optimized.onnx"
 
+    optimized_files = list(OPT_ONNX_DIR.glob("*.onnx"))
+if len(optimized_files) != 1:
+    raise RuntimeError(f"Expected one optimized ONNX file, found: {optimized_files}")
+
+optimized_model_path = optimized_files[0]
+
     # Restore inferred tensor types before quantization.
     inferred_model = shape_inference.infer_shapes(
         onnx.load(str(optimized_model_path))
