@@ -76,17 +76,26 @@ def main():
 
     optimized_model_path = optimized_files[0]
 
-    # Restore inferred tensor types before quantization.
+        # Restore inferred tensor types before quantization.
     inferred_model = shape_inference.infer_shapes(
         onnx.load(str(optimized_model_path))
     )
     onnx.save(inferred_model, str(optimized_model_path))
 
+    # Quantize the optimized model using dynamic INT8 quantization.
+    quantizer = ORTQuantizer.from_pretrained(
+        OPT_ONNX_DIR,
+        file_name=optimized_model_path.name,
+    )
+    dq_config = AutoQuantizationConfig.avx2(
+        is_static=False,
+        per_channel=False,
+    )
+
     quantizer.quantize(
         save_dir=QUANT_ONNX_DIR,
         quantization_config=dq_config,
     )
-
     # ORTQuantizer derives the output filename from the input model.
     # For example: model_optimized_quantized.onnx.
     quantized_files = list(QUANT_ONNX_DIR.glob("*_quantized.onnx"))
