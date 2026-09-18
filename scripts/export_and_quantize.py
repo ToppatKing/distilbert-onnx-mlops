@@ -13,6 +13,7 @@ from optimum.onnxruntime import ORTModelForSequenceClassification, ORTQuantizer
 from optimum.onnxruntime.configuration import AutoQuantizationConfig, AutoOptimizationConfig
 from transformers import AutoTokenizer
 from optimum.onnxruntime import ORTOptimizer
+from optimum.exporters.onnx import main_export
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
 logger = logging.getLogger(__name__)
@@ -36,7 +37,15 @@ def main():
     # 1. Export HuggingFace Model to ONNX
     logger.info(f"Step 1: Exporting {MODEL_ID} to ONNX format...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-    model = ORTModelForSequenceClassification.from_pretrained(MODEL_ID, export=True)
+
+    main_export(
+        model_name_or_path=MODEL_ID,
+        output=RAW_ONNX_DIR,
+        task="text-classification",
+        opset=14
+    )
+    
+    model = ORTModelForSequenceClassification.from_pretrained(RAW_ONNX_DIR)
     
     # Save tokenizer to the final directory right away
     tokenizer.save_pretrained(QUANT_ONNX_DIR)
