@@ -33,8 +33,8 @@ def clean_directories():
 
 def main():
     clean_directories()
+    QUANT_ONNX_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 1. Export HuggingFace Model to ONNX
     logger.info(f"Step 1: Exporting {MODEL_ID} to ONNX format...")
     tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
 
@@ -44,36 +44,32 @@ def main():
         task="text-classification",
         opset=17,
     )
-        
-    model = ORTModelForSequenceClassification.from_pretrained(RAW_ONNX_DIR)
-    
-    # Save tokenizer to the final directory right away
+
+    # Load the exported model without saving it back into RAW_ONNX_DIR.
+    model = ORTModelForSequenceClassification.from_pretrained(
+        RAW_ONNX_DIR,
+        file_name="model.onnx",
+    )
+
     tokenizer.save_pretrained(QUANT_ONNX_DIR)
-    model.save_pretrained(RAW_ONNX_DIR)
     logger.info(f"Exported raw ONNX model to {RAW_ONNX_DIR}")
 
-    # 2. Graph Optimization
-    logger.info("Step 2: Applying ONNX Graph Optimizations (fusion, constant folding)...")
     optimizer = ORTOptimizer.from_pretrained(model)
-    # ORT optimization config for sequence classification
-    opt_config = AutoOptimizationConfig.O2() # O2 includes basic + extended + layout optimizations
-    optimizer.optimize(save_dir=OPT_ONNX_DIR, optimization_config=opt_config)
-    logger.info(f"Saved optimized graph to {OPT_ONNX_DIR}")
+    opt_config = AutoOptimizationConfig.O2()
+    optimizer.optimize(
+        save_dir=OPT_ONNX_DIR,
+        optimization_config=opt_config,
+    )
 
-    # 3. Dynamic INT8 Quantization
-    # Note: Dynamic quantization is optimal for NLP models on CPUs
-    logger.info("Step 3: Applying Dynamic INT8 Quantization...")
-    # Load the optimized model for quantization
     quantizer = ORTQuantizer.from_pretrained(OPT_ONNX_DIR)
-    
-    # avx2/avx512 configs are standard for dynamic quant on modern x86 CPUs
-    dq_config = AutoQuantizationConfig.avx512_vnni(is_static=False, per_channel=True)
-    
+    dq_config = AutoQuantizationConfig.avx512_vnni(
+        is_static=False,
+        per_channel=True,
+    )
     quantizer.quantize(
         save_dir=QUANT_ONNX_DIR,
-        quantization_config=dq_config
+        quantization_config=dq_config,
     )
-    logger.info(f"Saved Dynamic INT8 quantized model to {QUANT_ONNX_DIR}")
 
     # 4. Compare sizes
     raw_size = os.path.getsize(RAW_ONNX_DIR / "model.onnx") / (1024 * 1024)
