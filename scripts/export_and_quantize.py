@@ -127,3 +127,6 @@ def main():
         f"Reduction:           "
         f"{((raw_size - quant_size) / raw_size) * 100:.1f}%"
     )
+
+if __name__ == "__main__":
+    main()
