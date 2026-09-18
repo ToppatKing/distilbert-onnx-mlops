@@ -49,6 +49,10 @@ COPY --from=builder /app/model_store/onnx_quantized ./model_store/onnx_quantized
 # Copy the application source code
 COPY src/ ./src/
 
+RUN addgroup --system mlops_user \
+    && adduser --system --ingroup mlops_user mlops_user \
+    && chown -R mlops_user:mlops_user /app
+    
 # Change ownership to non-root user
 RUN chown -R mlops_user:mlops_user /app
 USER mlops_user
