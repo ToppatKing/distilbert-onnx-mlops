@@ -1,6 +1,16 @@
+# Instruct pip to use the CPU-only PyTorch registry
+--extra-index-url https://download.pytorch.org/whl/cpu
+
+# Core Web Stack
 fastapi==0.104.1
 uvicorn[standard]==0.24.0
 pydantic==2.5.2
+prometheus-client==0.19.0
+
+# ML Dependencies
 transformers==4.35.2
 optimum[onnxruntime]==1.14.1
-prometheus-client==0.19.0
+
+# Explicitly add CPU PyTorch and onnxscript for the exporter
+torch
+onnxscript
