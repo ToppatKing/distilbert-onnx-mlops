@@ -8,6 +8,8 @@ and dynamically quantizes weights to INT8.
 import os
 import shutil
 import logging
+import onnx
+from onnx import shape_inference
 from pathlib import Path
 from optimum.onnxruntime import ORTModelForSequenceClassification, ORTQuantizer
 from optimum.onnxruntime.configuration import AutoQuantizationConfig, AutoOptimizationConfig
@@ -55,21 +57,37 @@ def main():
     logger.info(f"Exported raw ONNX model to {RAW_ONNX_DIR}")
 
     optimizer = ORTOptimizer.from_pretrained(model)
-    opt_config = AutoOptimizationConfig.O2()
+
+    # O2 applies transformer attention fusion that is incompatible with the
+    # ORT quantizer version used in this image. O1 retains safe graph
+    # optimizations without producing untyped intermediate MatMul outputs.
+    opt_config = AutoOptimizationConfig.O1()
+
     optimizer.optimize(
         save_dir=OPT_ONNX_DIR,
         optimization_config=opt_config,
     )
 
+    optimized_model_path = OPT_ONNX_DIR / "model_optimized.onnx"
+
+    # Restore inferred tensor types before quantization.
+    inferred_model = shape_inference.infer_shapes(
+        onnx.load(str(optimized_model_path))
+    )
+    onnx.save(inferred_model, str(optimized_model_path))
+
     quantizer = ORTQuantizer.from_pretrained(OPT_ONNX_DIR)
+
     dq_config = AutoQuantizationConfig.avx512_vnni(
         is_static=False,
         per_channel=True,
     )
+
     quantizer.quantize(
         save_dir=QUANT_ONNX_DIR,
         quantization_config=dq_config,
     )
+
 
     # 4. Compare sizes
     raw_size = os.path.getsize(RAW_ONNX_DIR / "model.onnx") / (1024 * 1024)
