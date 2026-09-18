@@ -74,7 +74,7 @@ def main():
     if len(optimized_files) != 1:
         raise RuntimeError(f"Expected one optimized ONNX file, found: {optimized_files}")
 
-optimized_model_path = optimized_files[0]
+    optimized_model_path = optimized_files[0]
 
     # Restore inferred tensor types before quantization.
     inferred_model = shape_inference.infer_shapes(
