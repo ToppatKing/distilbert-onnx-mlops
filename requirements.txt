@@ -5,9 +5,9 @@ uvicorn[standard]==0.24.0
 pydantic==2.5.2
 prometheus-client==0.19.0
 
- transformers==4.35.2
- optimum[onnxruntime]==1.14.1
- 
- torch==2.1.2+cpu
- onnx==1.15.0
- onnxruntime==1.16.3
+transformers==4.35.2
+optimum[onnxruntime]==1.14.1
+torch==2.1.2+cpu
+onnx==1.15.0
+onnxruntime==1.18.1
+numpy==1.26.4
